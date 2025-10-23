@@ -1,0 +1,143 @@
+version: "3.9"
+
+services:
+  # --- Eureka Service Discovery ---
+  eureka-server:
+    build:
+      context: ./eureka-server
+      dockerfile: Dockerfile
+    image: eureka-server:0.0.1-SNAPSHOT
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    ports:
+      - "8761:8761"
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    image: gateway:latest
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      # 👉 clave: usa el nombre del servicio eureka-server (DNS interno de Docker)
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+    ports:
+      - "8080:8080"
+    depends_on:
+      eureka-server:
+        condition: service_started
+    restart: unless-stopped
+
+
+  # --- Notification (instancia 0) ---
+  notification:
+    image: ms-notification:0.0.2-SNAPSHOT
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    ports:
+      - "7002:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker,streaming_partitioned,streaming_instance_0,kafka
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+      - SPRING_DATA_MONGODB_URI=mongodb://mongodb:27017/notifications
+      # Si necesitas props Kafka adicionales, añádelas aquí
+    depends_on:
+      eureka-server:
+        condition: service_started
+      mongodb:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    restart: unless-stopped
+
+  # --- Notification (instancia 1) ---
+  notification-p1:
+    image: ms-notification:0.0.2-SNAPSHOT
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker,streaming_partitioned,streaming_instance_1,kafka
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+      - SPRING_DATA_MONGODB_URI=mongodb://mongodb:27017/notifications
+    depends_on:
+      eureka-server:
+        condition: service_started
+      mongodb:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    restart: unless-stopped
+
+  # --- MongoDB ---
+  mongodb:
+    image: mongo:8
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+      - mongo-config:/data/configdb
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 2s
+      retries: 60
+    restart: unless-stopped
+
+  # --- ZooKeeper ---
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.1
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    ports:
+      - "2181:2181"
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+    volumes:
+      - zk-data:/var/lib/zookeeper/data
+      - zk-txn-logs:/var/lib/zookeeper/log
+    restart: unless-stopped
+
+  # --- Kafka ---
+  kafka:
+    image: confluentinc/cp-kafka:7.3.1
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_BROKER_ID=1
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_LOG_DIRS=/var/lib/kafka/data
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    depends_on:
+      - zookeeper
+    restart: unless-stopped
+
+# --- Volúmenes persistentes ---
+volumes:
+  mongo-data:
+  mongo-config:
+  zk-data:
+  zk-txn-logs:
+  kafka-data:

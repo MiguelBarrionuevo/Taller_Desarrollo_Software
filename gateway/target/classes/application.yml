@@ -1,0 +1,98 @@
+# =========================
+#  GATEWAY CONFIGURACIÓN BASE
+# =========================
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway
+  cloud:
+    gateway:
+      routes:
+        # API normal
+        - id: ms-notification
+          uri: lb://MS-NOTIFICATION
+          predicates:
+            - Path=/ms-notification/**
+          filters:
+            - StripPrefix=1
+
+        # HTML principal de Swagger UI para ms-notification
+        - id: ms-notification-swagger-html
+          uri: lb://MS-NOTIFICATION
+          predicates:
+            - Path=/openapi/ms-notification/swagger-ui.html
+          filters:
+            - SetPath=/openapi/swagger-ui.html
+
+        # Assets estáticos (index.html, css/js) en /openapi/swagger-ui/**
+        - id: ms-notification-swagger-static
+          uri: lb://MS-NOTIFICATION
+          predicates:
+            - Path=/openapi/swagger-ui/**
+          # sin filtros
+
+        # OpenAPI JSON SIN el prefijo del servicio (lo que el UI intenta cargar)
+        - id: ms-notification-openapi-docs-direct
+          uri: lb://MS-NOTIFICATION
+          predicates:
+            - Path=/openapi/v3/api-docs/**
+          # se reenvía tal cual
+
+        # (opcional) Ruta con el prefijo del servicio, por si la usas en links
+        - id: ms-notification-openapi-docs-prefixed
+          uri: lb://MS-NOTIFICATION
+          predicates:
+            - Path=/openapi/ms-notification/v3/api-docs/**
+          filters:
+            - RewritePath=/openapi/ms-notification/v3/api-docs(?<segment>/?.*), /openapi/v3/api-docs${segment}
+
+
+app:
+  eureka-server: eureka-server   # Valor por defecto (en local)
+
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://${app.eureka-server}:8761/eureka/
+    initialInstanceInfoReplicationIntervalSeconds: 5
+    registryFetchIntervalSeconds: 5
+  instance:
+    leaseRenewalIntervalInSeconds: 5
+    leaseExpirationDurationInSeconds: 5
+    prefer-ip-address: false
+
+management:
+  endpoint:
+    gateway:
+      enabled: true
+    health:
+      show-details: "ALWAYS"
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+
+logging:
+  level:
+    root: INFO
+    org.springframework.cloud.gateway.route.RouteDefinitionRouteLocator: INFO
+    org.springframework.cloud.gateway: TRACE
+
+# =========================
+#  PERFIL DOCKER
+# =========================
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+
+app:
+  eureka-server: eureka-server   # <- Nombre del contenedor Eureka en Docker
+
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://${app.eureka-server}:8761/eureka/

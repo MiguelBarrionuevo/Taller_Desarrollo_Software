@@ -1,0 +1,101 @@
+version: "3.9"
+
+services:
+  # ===================== EUREKA SERVER =====================
+  eureka-server:
+    build:
+      context: ./eureka-server
+      dockerfile: Dockerfile
+    image: eureka-server:0.0.1-SNAPSHOT
+    ports:
+      - "8761:8761"
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    image: gateway:latest
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      # 👉 clave: usa el nombre del servicio eureka-server (DNS interno de Docker)
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+    ports:
+      - "8080:8080"
+    depends_on:
+      eureka-server:
+        condition: service_started
+    restart: unless-stopped
+
+  # ===================== MS-NOTIFICATION =====================
+  notification:
+    build:
+      context: ./ms-notification
+      dockerfile: Dockerfile
+    image: ms-notification:0.0.2-SNAPSHOT
+    ports:
+      - "7002:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+      - SPRING_DATA_MONGODB_URI=mongodb://mongodb:27017/notifications
+    depends_on:
+      eureka-server:
+        condition: service_started
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ===================== MONGODB =====================
+  mongodb:
+    image: mongo:8
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    ports:
+      - "27017:27017"
+    # Persistencia del directorio de datos
+    volumes:
+      - mongo-data:/data/db
+      - mongo-config:/data/configdb
+    command: mongod
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 2s
+      retries: 60
+    restart: unless-stopped
+
+  # ===================== RABBITMQ =====================
+  rabbitmq:
+    image: rabbitmq:3.11.8-management
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    # Persistencia de colas y configuraciones
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - rabbitmq-logs:/var/log/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 5s
+      timeout: 2s
+      retries: 60
+    restart: unless-stopped
+
+# ===================== VOLUMENES =====================
+volumes:
+  mongo-data:
+  mongo-config:
+  rabbitmq-data:
+  rabbitmq-logs:

@@ -1,0 +1,140 @@
+# ===== Base (local) =====
+server:
+  port: 8081
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-exception: true
+
+app:
+  eureka-server: localhost     # <- local
+
+spring:
+  application:
+    name: ms-notification
+  config:
+    import: "classpath:application-openapi.yml"
+  data:
+    mongodb:
+      uri: ${SPRING_DATA_MONGODB_URI:}
+      host: ${SPRING_DATA_MONGODB_HOST:localhost}
+      port: ${SPRING_DATA_MONGODB_PORT:27017}
+      database: ${SPRING_DATA_MONGODB_DATABASE:notification-db}
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:127.0.0.1}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:guest}
+    password: ${SPRING_RABBITMQ_PASSWORD:guest}
+  cloud:
+    function:
+      definition: messageProcessor
+    stream:
+      defaultBinder: rabbit
+      default:
+        contentType: application/json
+      bindings:
+        messageProcessor-in-0:
+          destination: notifications
+          group: notificationsGroup
+          consumer:
+            maxAttempts: 3
+            backOffInitialInterval: 500
+            backOffMaxInterval: 1000
+            backOffMultiplier: 2.0
+      kafka:
+        binder:
+          brokers: 127.0.0.1
+          defaultBrokerPort: 9092
+
+eureka:
+  instance:
+    lease-renewal-interval-in-seconds: 10      # heartbeat cada 10s
+    lease-expiration-duration-in-seconds: 30   # se considera caído a los 30s sin heartbeats
+  client:
+    serviceUrl:
+      defaultZone: http://${app.eureka-server}:8761/eureka/
+
+# ===== Perfil docker =====
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+  data:
+    mongodb:
+      host: mongodb
+  rabbitmq:
+    host: rabbitmq
+  cloud:
+    stream:
+      kafka:
+        binder:
+          brokers: kafka
+server:
+  port: 8080
+app:
+  eureka-server: eureka-server
+
+eureka:
+  instance:
+    lease-renewal-interval-in-seconds: 10
+    lease-expiration-duration-in-seconds: 30
+
+
+---
+# Perfil para particionamiento
+spring:
+  config:
+    activate:
+      on-profile: streaming_partitioned
+  cloud:
+    stream:
+      bindings:
+        messageProcessor-in-0:
+          consumer:
+            partitioned: true
+            instanceCount: 2
+
+---
+# Instancia 0
+spring:
+  config:
+    activate:
+      on-profile: streaming_instance_0
+  cloud:
+    stream:
+      bindings:
+        messageProcessor-in-0:
+          consumer:
+            instanceIndex: 0
+
+---
+# Instancia 1
+spring:
+  config:
+    activate:
+      on-profile: streaming_instance_1
+  cloud:
+    stream:
+      bindings:
+        messageProcessor-in-0:
+          consumer:
+            instanceIndex: 1
+
+---
+# Perfil para usar Kafka
+spring:
+  config:
+    activate:
+      on-profile: kafka
+  cloud:
+    stream:
+      defaultBinder: kafka
+      kafka:
+        binder:
+          brokers: kafka:9092
+          replication-factor: 1
+management:
+  health:
+    rabbit:
+      enabled: false

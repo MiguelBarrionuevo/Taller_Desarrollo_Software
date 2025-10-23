@@ -1,0 +1,131 @@
+version: "3.9"
+
+services:
+  # --- Eureka Service Discovery ---
+  eureka-server:
+    build:
+      context: ./eureka-server
+      dockerfile: Dockerfile
+    image: eureka-server:0.0.1-SNAPSHOT
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    ports:
+      - "8761:8761"
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    image: gateway:latest
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      # 👉 clave: usa el nombre del servicio eureka-server (DNS interno de Docker)
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+    ports:
+      - "8080:8080"
+    depends_on:
+      eureka-server:
+        condition: service_started
+    restart: unless-stopped
+
+
+
+  # --- Notification (instancia 0) ---
+  notification-p:
+    image: ms-notification:0.0.2-SNAPSHOT
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    ports:
+      - "7002:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker,streaming_partitioned,streaming_instance_0
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+      - SPRING_DATA_MONGODB_URI=mongodb://mongodb:27017/notifications
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      - SPRING_RABBITMQ_USERNAME=guest
+      - SPRING_RABBITMQ_PASSWORD=guest
+    depends_on:
+      eureka-server:
+        condition: service_started
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- Notification (instancia 1) ---
+  notification-p1:
+    image: ms-notification:0.0.2-SNAPSHOT
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker,streaming_partitioned,streaming_instance_1
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+      - SPRING_DATA_MONGODB_URI=mongodb://mongodb:27017/notifications
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      - SPRING_RABBITMQ_USERNAME=guest
+      - SPRING_RABBITMQ_PASSWORD=guest
+    depends_on:
+      eureka-server:
+        condition: service_started
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- MongoDB ---
+  mongodb:
+    image: mongo:8
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+      - mongo-config:/data/configdb
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 2s
+      retries: 60
+    restart: unless-stopped
+
+  # --- RabbitMQ ---
+  rabbitmq:
+    image: rabbitmq:3.11.8-management
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - rabbitmq-logs:/var/log/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 5s
+      timeout: 2s
+      retries: 60
+    restart: unless-stopped
+
+# --- VOLUMENES PERSISTENTES ---
+volumes:
+  mongo-data:
+  mongo-config:
+  rabbitmq-data:
+  rabbitmq-logs:
